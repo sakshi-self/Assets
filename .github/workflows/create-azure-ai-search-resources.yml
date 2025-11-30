@@ -1,4 +1,4 @@
-name: Create Azure AI Search Resources
+name: Azure AI Search Automation Workflow
 
 on:
   workflow_dispatch:
