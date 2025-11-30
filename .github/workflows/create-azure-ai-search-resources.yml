@@ -1,0 +1,434 @@
+name: Create Azure AI Search Resources
+
+on:
+  workflow_dispatch:
+    inputs:
+      Environment:
+        description: "Select the environment to deploy"
+        required: true
+        type: choice
+        options:
+          - Dev
+          - PerfTesting
+          - Uat
+          - Staging
+          - Prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-search:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.Environment == 'Dev' && 'test' || github.event.inputs.Environment == 'PerfTesting' && 'perf-test' ||  github.event.inputs.Environment == 'Uat' && 'uat' ||  github.event.inputs.Environment == 'Staging' && 'staging' ||  github.event.inputs.Environment == 'Prod' && 'prod' }}
+    
+    env:
+      RESOURCE_GROUP: ${{ secrets.RG_NAME }}
+      SQL_SERVER_NAME: ${{ vars.SQL_SERVER_NAME }}
+      SQL_DB_NAME: ${{ vars.SQL_DB_NAME }}
+      SEARCH_SERVICE: ${{ vars.SEARCHSERVICE_NAME }}
+      OPENAI_URI: ${{ vars.OPENAI_URI }}
+      SKILLSET: ${{ vars.SKILLSET }}
+      INDEX: ${{ vars.INDEX }}
+      INDEXER: ${{ vars.INDEXER }}
+      DATASOURCE: ${{ vars.DATASOURCE }}
+      VECTORCONFIG: ${{ vars.VECTORCONFIG }}
+      VECTORPROFILE: ${{ vars.VECTORPROFILE }}
+      VECTORIZER: ${{ vars.VECTORIZER }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: 'Azure Login using OIDC'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create Data Source
+        run: |
+            curl -X PUT "https://${{ env.SEARCH_SERVICE }}.search.windows.net/datasources/${{ env.DATASOURCE }}?api-version=2025-05-01-Preview" \
+            -H "Content-Type: application/json" \
+            -H "api-key: ${{ secrets.AZURE_SEARCH_API_KEY }}" \
+            -d '{
+                  "type": "azuresql",
+                  "credentials": {
+                    "connectionString": "Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Database=${{ env.SQL_DB_NAME }};ResourceId=/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.RESOURCE_GROUP }}/providers/Microsoft.Sql/servers/${{ env.SQL_SERVER_NAME }};"
+                  },
+                  "container": {
+                    "name": "Bookmarks"
+                  }
+              }
+                }'
+
+      - name: Create Skillset
+        run: |
+            curl -X PUT "https://${{ env.SEARCH_SERVICE }}.search.windows.net/skillsets/${{ env.SKILLSET }}?api-version=2025-05-01-Preview" \
+            -H "Content-Type: application/json" \
+            -H "api-key: ${{ secrets.AZURE_SEARCH_API_KEY }}" \
+            -d '{
+                  "skills": [
+                  {
+                    "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+                    "context": "/document/Description",
+                    "deploymentId": "text-embedding-3-small",
+                    "dimensions": 1536,
+                    "inputs": [
+                      {
+                        "name": "text",
+                        "source": "/document/Description"
+                      }
+                    ],
+                    "modelName": "text-embedding-3-small",
+                    "name": "#1",
+                    "outputs": [
+                      {
+                        "name": "embedding",
+                        "targetName": "embedding"
+                      }
+                    ],
+                    "resourceUri": "${{ env.OPENAI_URI }}"
+                  }
+                ]
+              }
+                }'  
+
+      - name: Create Index
+        run: |
+            curl -X PUT "https://${{ env.SEARCH_SERVICE }}.search.windows.net/indexes/${{ env.INDEX }}?api-version=2025-05-01-Preview" \
+            -H "Content-Type: application/json" \
+            -H "api-key: ${{ secrets.AZURE_SEARCH_API_KEY }}" \
+            -d '{
+                  "fields": [
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Title",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Url",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Keywords",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "MatchSimilarKeywords",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": true,
+                    "key": false,
+                    "name": "State",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": true,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Description",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "ReservedKeywords",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Categories",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": true,
+                    "key": false,
+                    "name": "StartDate",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": true,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.DateTimeOffset"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": true,
+                    "key": false,
+                    "name": "EndDate",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": true,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.DateTimeOffset"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": true,
+                    "key": false,
+                    "name": "Region",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "UseAADLocation",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Groups",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "Device",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "TargetedVariations",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "facetable": false,
+                    "filterable": true,
+                    "key": false,
+                    "name": "LastModified",
+                    "retrievable": true,
+                    "searchable": false,
+                    "sortable": true,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.DateTimeOffset"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": true,
+                    "key": false,
+                    "name": "LastModifiedBy",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "analyzer": "standard.lucene",
+                    "facetable": false,
+                    "filterable": true,
+                    "key": true,
+                    "name": "id",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "type": "Edm.String"
+                  },
+                  {
+                    "dimensions": 1536,
+                    "facetable": false,
+                    "filterable": false,
+                    "key": false,
+                    "name": "vector",
+                    "retrievable": true,
+                    "searchable": true,
+                    "sortable": false,
+                    "stored": true,
+                    "synonymMaps": [],
+                    "vectorSearchProfile": "${{ env.VECTORPROFILE }}",
+                    "type": "Collection(Edm.Single)"
+                  }
+                ],
+                "vectorSearchProfile": "${{ env.VECTORPROFILE }}",
+                "semantic": {
+                  "configurations": [
+                    {
+                      "flightingOptIn": false,
+                      "name": "semantic-configuration",
+                      "prioritizedFields": {
+                        "prioritizedContentFields": [
+                          {
+                            "fieldName": "Description"
+                          }
+                        ],
+                        "prioritizedKeywordsFields": [
+                          {
+                            "fieldName": "Keywords"
+                          }
+                        ],
+                        "titleField": {
+                          "fieldName": "Title"
+                        }
+                      },
+                      "rankingOrder": "BoostedRerankerScore"
+                    }
+                  ]
+                },
+                "similarity": {
+                  "@odata.type": "#Microsoft.Azure.Search.BM25Similarity"
+                },
+                "vectorSearch": {
+                  "algorithms": [
+                    {
+                      "hnswParameters": {
+                        "efConstruction": 400,
+                        "efSearch": 500,
+                        "m": 4,
+                        "metric": "cosine"
+                      },
+                      "kind": "hnsw",
+                      "name": "${{ env.VECTORCONFIG }}"
+                    }
+                  ],
+                  "profiles": [
+                    {
+                      "algorithm": "${{ env.VECTORCONFIG }}",
+                      "name": "${{ env.VECTORPROFILE }}",
+                      "vectorizer": "${{ env.VECTORIZER }}"
+                    }
+                  ],
+                  "vectorizers": [
+                    {
+                      "azureOpenAIParameters": {
+                        "deploymentId": "text-embedding-3-small",
+                        "modelName": "text-embedding-3-small",
+                        "resourceUri": "${{ env.OPENAI_URI }}"
+                      },
+                      "kind": "azureOpenAI",
+                      "name": "${{ env.VECTORIZER }}"
+                    }
+                  ]
+                }
+              }
+            }'  
+
+      - name: Create Indexer
+        run: |
+            curl -X PUT "https://${{ env.SEARCH_SERVICE }}.search.windows.net/indexers/${{ env.INDEXER }}?api-version=2025-05-01-Preview" \
+            -H "Content-Type: application/json" \
+            -H "api-key: ${{ secrets.AZURE_SEARCH_API_KEY }}" \
+            -d '{
+                  "dataSourceName": "${{ env.DATASOURCE }}",
+                "outputFieldMappings": [
+                    {
+                    "mappingFunction": null,
+                    "sourceFieldName": "/document/Description/embedding",
+                    "targetFieldName": "vector"
+                    }
+                ],
+                "parameters": {
+                  "batchSize": null,
+                  "configuration": {},
+                  "maxFailedItems": 0,
+                  "maxFailedItemsPerBatch": 0
+                },
+                "skillsetName": "${{ env.SKILLSET }}",
+                "targetIndexName": "${{ env.INDEX }}"
+              }
+                }'
